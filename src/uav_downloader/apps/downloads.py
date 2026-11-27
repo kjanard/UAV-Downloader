@@ -166,10 +166,13 @@ def storage_problem_code(error: object) -> str:
 
 
 def classify_download_problem(error: object, state: str = '') -> DownloadProblem:
+    if state in DONE_STATES:
+        return DownloadProblem('', False)
     disk = storage_problem_code(error)
     if disk:
         return DownloadProblem(disk, False)
     value = str(error or '').lower()
+    value_no_url = re.sub(r'https?://\S+', ' ', value)
     # This prefix is also saved in CSV, where the exception type is lost.
     # A segment-level HTTP status or example index (e.g. 404) doesn't mean
     # the *video page* is missing. Keep the normal bounded retry policy.
@@ -188,13 +191,15 @@ def classify_download_problem(error: object, state: str = '') -> DownloadProblem
     if ('ffmpeg' in value and ('not found' in value or 'missing' in value)):
         return DownloadProblem('ffmpeg_missing', False)
     if (state == '封鎖/解析失敗' or 'cloudflare' in value or
-            'blocked' in value or '429' in value or '403' in value):
+            'blocked' in value or
+            bool(re.search(r'(?<![a-z0-9_-])(?:403|429)(?![a-z0-9_-])', value_no_url))):
         return DownloadProblem('blocked', True)
     if ('timeout' in value or 'timed out' in value or
             'connection' in value or 'reset by peer' in value or
             'temporarily unavailable' in value):
         return DownloadProblem('network', True)
-    if ('not found' in value or '404' in value or 'removed' in value):
+    if ('not found' in value or 'removed' in value or
+            bool(re.search(r'(?<![a-z0-9_-])404(?![a-z0-9_-])', value_no_url))):
         return DownloadProblem('video_missing', False)
     if state in FAILED_STATES or value:
         return DownloadProblem('parse_or_unknown', True)

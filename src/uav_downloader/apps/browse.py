@@ -539,6 +539,7 @@ class DownloadManager:
             item = self._items.get(url)
             if item is None:
                 return False
+            self._restart_pending.pop(url, None)
             pending = [task for task in self._pending if task.url == url]
             if pending:
                 self._pending = [
@@ -569,7 +570,8 @@ class DownloadManager:
                 subtitle.cancelled.set()
                 contexts.append(subtitle)
             if not contexts:
-                if item.state in {'已下載', '未偵測到日語語音'}:
+                if (item.state in DONE_STATES or item.state in FAILED_STATES or
+                        item.state == '已取消'):
                     return False
                 self._set_state(url, '已暫停', error='')
                 return True
@@ -1042,6 +1044,7 @@ class DownloadManager:
             restart_requested = (
                 restart is not None
                 and restart[0] is task
+                and not task.pause_requested
                 and task.epoch == self._cancel_epoch
                 and task.url in self._items)
             context_cancelled = self._context_cancelled_locked(task)
@@ -1355,7 +1358,8 @@ class DownloadManager:
                         break
                     url = row.get('網址', '')
                     if url:
-                        state = row.get('狀態', '')
+                        raw_state = row.get('狀態', '')
+                        state = raw_state
                         if state in (
                                 '下載中', '準備中', '等待中',
                                 '等待重試', '已排程', '字幕準備中',
@@ -1377,6 +1381,7 @@ class DownloadManager:
                             job_id=row.get('工作 ID', ''),
                             site=row.get('網站', ''),
                             created_at=_number('建立時間'))
+                        item.not_before = max(0.0, _number('排程時間'))
                         progress = (row.get('進度', '') or '').rstrip('%')
                         try:
                             item.progress = int(float(progress))
@@ -1391,8 +1396,10 @@ class DownloadManager:
                                 saved_code = 'segment_access_denied'
                         item.error_code = (
                             storage_problem_code(item.error) or saved_code or
-                            classify_download_problem(
-                                item.error, item.state).code)
+                            (classify_download_problem(
+                                item.error, item.state).code
+                             if (item.error or raw_state in FAILED_STATES)
+                             else ''))
                         try:
                             item.retry_count = max(
                                 0, int(row.get('重試次數', 0) or 0))
@@ -4349,6 +4356,31 @@ class ModernApp(ctk.CTk):
     def _on_search(self):
         q = self._search_var.get().strip()
         if not q:
+            if self._site_key == 'Hanime1':
+                self._hanime_filter_state['query'] = ''
+                self._apply_hanime_filter_state()
+                return
+            cats = getattr(self, '_categories', ()) or ()
+            cat_var = getattr(self, '_cat_var', None)
+            cat_name = cat_var.get() if cat_var is not None else ''
+            chosen = next((c for c in cats if c['name'] == cat_name), None)
+            if chosen is None and cats:
+                chosen = cats[0]
+                if cat_var is not None:
+                    cat_var.set(chosen['name'])
+            if chosen is None:
+                return
+            self._current_base_url = chosen['url']
+            self._page = 1
+            self._last_loaded_page = 1
+            self._has_next = True
+            self._browse_blocked = False
+            self._browse_empty_message = ''
+            self._selected_urls.clear()
+            self._selected_videos.clear()
+            self._selected_source_subtitle_evidence.clear()
+            self._update_selection_count()
+            self._load_page()
             return
         from urllib.parse import quote
         if self._site_key == 'JableTV':

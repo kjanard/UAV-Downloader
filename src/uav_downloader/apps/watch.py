@@ -1858,12 +1858,12 @@ class SmallToolWorker:
                 self._log('  [ERR] download failed')
                 if not getattr(site_obj, 'respect_segment_denials', False):
                     self._cleanup_temp(site_obj)
-                return
+                return 'download_incomplete'
 
             if getattr(site_obj, '_cancel_job', False):
                 self._log('  [CANCELLED]')
                 self._cleanup_temp(site_obj)
-                return
+                return 'cancelled'
             subtitle_mode = normalize_subtitle_mode(
                 self._subtitle_mode if subtitle_mode is None else subtitle_mode)
             if subtitle_mode != 'none':
@@ -1948,11 +1948,13 @@ class SmallToolWorker:
                             'subtitle_ready', count=len(subtitle_result.files)))
                 except SubtitleCancelled:
                     self._log(f'  [CANCELLED] {T("subtitle_cancelled")}')
-                    return
+                    return 'cancelled'
                 except StorageWriteError:
                     raise
                 except Exception as exc:
-                    self._log(f'  [SUBTITLE-ERR] {T("subtitle_failed", error=str(exc))}')
+                    self._log(
+                        f'  [SUBTITLE-ERR] '
+                        f'{T("subtitle_failed", error=translation_failure_message(exc))}')
                     return 'subtitle_failed'
             self._log(f'  [OK] {title}')
             if video.get('_collection_part'):
@@ -1980,6 +1982,7 @@ class SmallToolWorker:
             self._log(f'  [ERR] {e}')
             if site_obj and not getattr(site_obj, 'respect_segment_denials', False):
                 self._cleanup_temp(site_obj)
+            return 'download_incomplete'
         finally:
             with self._active_site_lock:
                 if self._active_site is site_obj:
